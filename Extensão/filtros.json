@@ -1,0 +1,28 @@
+{
+  "vencimento": [
+    "ate_2_anos"
+  ],
+  "liquidez": [
+    "no_venc"
+  ],
+  "indexador": [
+    "pre_fixado",
+    "ipca",
+    "cdi"
+  ],
+  "outros": [
+    "publico_geral"
+  ],
+  "assinatura": "15151515",
+  "limite_compra": 10000,
+  "ordem_classe": [
+    "cdi",
+    "ipca",
+    "pre_fixado"
+  ],
+  "taxa_minima": {
+    "cdi": 103,
+    "ipca": 7,
+    "pre_fixado": 15
+  }
+}

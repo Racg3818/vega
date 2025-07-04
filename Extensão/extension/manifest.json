@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Vega",
+  "version": "1.0",
+  "description": "Extensão para selecionar filtros de renda fixa e aplicar automaticamente na XP.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://localhost:5000/*",
+    "https://experiencia.xpi.com.br/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://experiencia.xpi.com.br/*"],
+      "js": ["content.bundle.js"]
+    }
+  ],
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}

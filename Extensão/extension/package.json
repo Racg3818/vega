@@ -1,0 +1,14 @@
+{
+  "name": "xp-extensao",
+  "version": "1.0.0",
+  "description": "Extensão XP RF Filtros",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.5"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.50.2"
+  }
+}
