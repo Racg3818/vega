@@ -1,18 +1,72 @@
 import { createClient } from "@supabase/supabase-js";
 
-const urlToken = new URLSearchParams(window.location.hash.split("?")[1] || "").get("token");
-if (urlToken) {
-  chrome.runtime.sendMessage({ type: "SET_USER_TOKEN", token: urlToken }, () => {
-    console.log("🔐 Token capturado da URL e salvo no storage:", urlToken);
+console.log("📡 content.js iniciado em:", window.location.href);
+
+if (
+  window.location.hostname.includes("localhost") ||
+  window.location.hostname.includes("vega")
+) {
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    if (event.data?.type === "VEGA_AUTH") {
+      const auth = {
+        access_token: event.data.access_token,
+        user_id: event.data.user_id,
+      };
+
+      chrome.runtime.sendMessage(
+        {
+          type: "SET_USER_TOKEN",
+          access_token: auth.access_token,
+          user_id: auth.user_id,
+        },
+        () => {
+          console.log("✅ Credenciais recebidas via postMessage e salvas:", auth);
+        }
+      );
+    }
+  });
+
+  console.log("👂 Aguardando VEGA_AUTH via window.postMessage...");
+}
+
+
+let access_token = null;
+let user_id = null;
+
+async function esperarCredenciais(timeout = 5000) {
+  return new Promise((resolve, reject) => {
+    const interval = 500;
+    const maxTentativas = timeout / interval;
+    let tentativas = 0;
+
+    const checar = () => {
+      chrome.runtime.sendMessage({ type: "GET_USER_TOKEN" }, (response) => {
+        if (response?.access_token && response?.user_id) {
+          console.log("🔐 Credenciais recuperadas com sucesso:", response);
+          resolve(response);
+        } else {
+          tentativas++;
+          console.warn("🕒 Aguardando token no background... tentativa", tentativas);
+          if (tentativas >= maxTentativas) {
+            reject("❌ Token/user_id ausentes após aguardo.");
+          } else {
+            setTimeout(checar, interval);
+          }
+        }
+      });
+    };
+
+    checar();
   });
 }
+
 
 // ============ CONSTANTES ============
 const URL_API = "http://localhost:5000/filtros.json";
 const logCompras = [];
 const supabaseUrl = "https://rgkvzoeanbkbeqjbntdq.supabase.co";
 const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJna3Z6b2VhbmJrYmVxamJudGRxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA5MDczMjEsImV4cCI6MjA2NjQ4MzMyMX0.Qhy9GQOJD0wLSBmGLdS6QGxvERfST2FYqCDBo-F1njk";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // ============ CAPTURA DE SALDO VIA TELA DE CONTA ============
 if (window.location.href.includes("https://experiencia.xpi.com.br/conta/#/")) {
@@ -71,7 +125,7 @@ if (window.location.href.includes("https://experiencia.xpi.com.br/conta/#/")) {
       const saldoCapturado = await esperarSaldo();
       console.log("💰 Saldo capturado com sucesso:", saldoCapturado);
       localStorage.setItem("saldoXP", saldoCapturado);
-      window.location.href = "https://experiencia.xpi.com.br/renda-fixa/#/emissao-bancaria?offertoken=true";
+	  window.location.href = "https://experiencia.xpi.com.br/renda-fixa/#/emissao-bancaria?offertoken=true";
     } catch (err) {
       console.error(err);
     }
@@ -134,10 +188,50 @@ function converterDataBRparaISO(dataStr) {
   return `${ano}-${mes.padStart(2, "0")}-${dia.padStart(2, "0")}`;
 }
 
-
 function detectarIsencao(nomeAtivo) {
   const nome = nomeAtivo.toUpperCase();
   return nome.includes("LCA") || nome.includes("LCI") || nome.includes("LCD");
+}
+
+function calcularMediaFormatada(ativos, indexador) {
+  const isentos = ativos.filter(a => a.isento);
+  const tributados = ativos.filter(a => !a.isento);
+
+  const calcular = (grupo) => {
+    if (grupo.length === 0) return null;
+
+    const taxasNum = grupo.map((a) => {
+      const tx = a.taxa.toUpperCase();
+      if (indexador === "IPCA") {
+        const match = tx.match(/IPCA\s*\+\s*([\d,\.]+)/);
+        return match ? parseFloat(match[1].replace(",", ".")) : null;
+      } else if (indexador === "CDI") {
+        if (tx.includes("%")) {
+          const match = tx.match(/([\d,\.]+)\s*%/);
+          return match ? parseFloat(match[1].replace(",", ".")) : null;
+        }
+        const match = tx.match(/CDI\s*\+\s*([\d,\.]+)/);
+        return match ? parseFloat(match[1].replace(",", ".")) : null;
+      } else {
+        // Prefixado
+        const match = tx.match(/([\d,\.]+)\s*%/);
+        return match ? parseFloat(match[1].replace(",", ".")) : null;
+      }
+    }).filter(n => typeof n === "number");
+
+    if (taxasNum.length === 0) return null;
+
+    const media = taxasNum.reduce((a, b) => a + b, 0) / taxasNum.length;
+
+    if (indexador === "IPCA") return `IPCA + ${media.toFixed(2)}%`;
+    if (indexador === "CDI") return `${media.toFixed(0)}% do CDI`; // ou CDI + X%
+    return `${media.toFixed(2)}%`;
+  };
+
+  return {
+    isento: calcular(isentos),
+    tributado: calcular(tributados),
+  };
 }
 
 const restricoesAplicMin = {
@@ -435,8 +529,6 @@ async function marcarCheckboxEAvancar() {
   return true;
 }
 
-
-
 async function digitarSenhaEletronica(senha) {
   const teclas = senha.split(""); // exemplo: "845137" → ["8", "4", "5", "1", "3", "7"]
   console.log("🔐 Iniciando digitação da assinatura eletrônica...");
@@ -504,253 +596,313 @@ async function clicarBotaoFinalAposSenha() {
   return true;
 }
 
-async function esperarTokenUsuario(timeout = 5000) {
-  const intervalo = 300;
-  const maxTentativas = Math.ceil(timeout / intervalo);
-  let tentativas = 0;
+esperarCredenciais().then((credenciais) => {
+	access_token = credenciais.access_token;
+	user_id = credenciais.user_id;
+	console.log("✅ access_token e user_id carregados do storage:", credenciais);
 
-  return new Promise((resolve) => {
-    const tentar = () => {
-      chrome.runtime.sendMessage({ type: "GET_USER_TOKEN" }, (response) => {
-        const token = response?.user_id;
-        if (token) {
-          resolve(token);
-        } else if (++tentativas < maxTentativas) {
-          setTimeout(tentar, intervalo);
-        } else {
-          console.warn("⚠️ Token do usuário não encontrado após tentativas.");
-          resolve(null);
-        }
-      });
-    };
-    tentar();
-  });
-}
+	aplicarFiltrosXP(); // agora sim pode chamar a função
+  }).catch((err) => {
+	console.error(err);
+});
 
-
-
+  
 // ============ CÓDIGO PRINCIPAL ============
-(async function aplicarFiltrosXP() {
+async function aplicarFiltrosXP() {
   try {
-    const res = await fetch(URL_API);
-    const filtros = await res.json();
-
-    // Aguarda e clica no filtro inicial
-    try {
-	  console.log("🕒 Aguardando botão 'Filtrar' aparecer na tela...");
-	  const botaoFiltro = await esperarElemento("//soma-chip[contains(., 'Filtrar')]", 7000);
 	  
-	  if (!botaoFiltro) {
-		console.error("❌ Botão 'Filtrar' não encontrado após aguardo.");
+    if (window.location.href.includes("experiencia.xpi.com.br/renda-fixa")) {
+	  const res = await fetch(URL_API);
+	  const filtros = await res.json(); 
+	  
+	  // Aguarda e clica no filtro inicial
+	  try {
+		console.log("🕒 Aguardando botão 'Filtrar' aparecer na tela...");
+		const botaoFiltro = await esperarElemento("//soma-chip[contains(., 'Filtrar')]", 7000);
+
+		if (!botaoFiltro) {
+		  console.error("❌ Botão 'Filtrar' não encontrado após aguardo.");
+		  return;
+		}
+
+		botaoFiltro.scrollIntoView({ behavior: "smooth", block: "center" });
+		await new Promise((r) => setTimeout(r, 300));
+		botaoFiltro.click();
+
+		console.log("✅ Botão 'Filtrar' clicado com sucesso.");
+		await new Promise((r) => setTimeout(r, 1000));
+	  } catch (err) {
+		console.error("❌ Erro ao localizar ou clicar no botão 'Filtrar':", err);
 		return;
 	  }
+	
 
-	  botaoFiltro.scrollIntoView({ behavior: "smooth", block: "center" });
-	  await new Promise(r => setTimeout(r, 300)); // suaviza carregamento
-	  botaoFiltro.click();
+		// Aplica filtros personalizados
+		try {
+		  console.log("🎯 Iniciando aplicação de filtros visuais...");
+		  for (const grupo in filtros) {
+			if (["assinatura", "limite_compra", "ordem_classe", "taxa_minima"].includes(grupo)) continue;
+			const valores = filtros[grupo];
+			for (const valor of valores) {
+			  const label = mapa[grupo.toLowerCase()]?.[valor];
+			  if (!label) {
+				console.warn(`⚠️ Label não encontrado no mapa para grupo '${grupo}', valor '${valor}'`);
+				continue;
+			  }
 
-	  console.log("✅ Botão 'Filtrar' clicado com sucesso.");
-	  await new Promise(r => setTimeout(r, 1000));
-	} catch (err) {
-	  console.error("❌ Erro ao localizar ou clicar no botão 'Filtrar':", err);
-	  return;
-	}
+			  const xpath = `//soma-chip[contains(., '${label}')]`;
+			  const chip = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+			  if (chip) {
+				chip.click();
+				console.log(`✅ Filtro aplicado: [${grupo}] → ${label}`);
+			  } else {
+				console.warn(`⚠️ soma-chip '${label}' não encontrado na tela.`);
+			  }
+			  await new Promise(r => setTimeout(r, 300));
+			}
+		  }
+		  console.log("✅ Filtros visuais aplicados com sucesso.");
+		} catch (err) {
+		  console.error("❌ Erro ao aplicar filtros visuais:", err);
+		}
 
-    // Aplica filtros personalizados
-    try {
-	  console.log("🎯 Iniciando aplicação de filtros visuais...");
-	  for (const grupo in filtros) {
-		if (["assinatura", "limite_compra", "ordem_classe", "taxa_minima"].includes(grupo)) continue;
-		const valores = filtros[grupo];
-		for (const valor of valores) {
-		  const label = mapa[grupo.toLowerCase()]?.[valor];
-		  if (!label) {
-			console.warn(`⚠️ Label não encontrado no mapa para grupo '${grupo}', valor '${valor}'`);
+		// Variáveis de controle
+		const assinatura = filtros.assinatura;
+		const limite = filtros.limite_compra;
+		let ordem = filtros.ordem_classe;
+		const taxasMin = filtros.taxa_minima || { cdi: 0, ipca: 0, pre_fixado: 0 };
+		const filtrosAplicMin = filtros.aplicacao_minima || [];
+
+		function ativoPassaFiltroAplicMin(valor) {
+		  if (filtrosAplicMin.length === 0) return true;
+		  return filtrosAplicMin.some(chave => restricoesAplicMin[chave]?.(valor));
+		}
+
+		if (!Array.isArray(ordem)) ordem = ["cdi", "ipca", "pre_fixado"];
+
+		try {
+		  console.log("🕒 Aguardando carregamento da tabela de ativos...");
+		  await esperarElemento("soma-table-body soma-table-row", 5000, false);
+		  await rolarAteFinalTabelaAtivos();
+		  
+		} catch (err) {
+		  console.error("❌ Erro ao aguardar a tabela de ativos:", err);
+		  return;
+		}
+		
+		const saldoArmazenado = parseFloat(localStorage.getItem("saldoXP") || "0");
+		const saldoTotal = saldoArmazenado || await esperarSaldoDisponivel();
+		console.log("💰 Saldo total carregado para comparação:", saldoTotal);
+
+		for (const classe of ordem) {
+			
+		  await aplicarFiltroPorClasse(classe);
+
+		  try {
+			await esperarElemento("soma-table-body soma-table-row", 5000, false);
+			await new Promise(r => setTimeout(r, 500));
+			console.log(`✅ Tabela de ativos carregada para classe: ${classe}`);
+		  } catch (err) {
+			console.error(`❌ Erro ao carregar tabela da classe ${classe}:`, err);
 			continue;
 		  }
 
-		  const xpath = `//soma-chip[contains(., '${label}')]`;
-		  const chip = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-		  if (chip) {
-			chip.click();
-			console.log(`✅ Filtro aplicado: [${grupo}] → ${label}`);
-		  } else {
-			console.warn(`⚠️ soma-chip '${label}' não encontrado na tela.`);
-		  }
-		  await new Promise(r => setTimeout(r, 300));
-		}
-	  }
-	  console.log("✅ Filtros visuais aplicados com sucesso.");
-	} catch (err) {
-	  console.error("❌ Erro ao aplicar filtros visuais:", err);
-	}
+		  const rows = document.querySelectorAll("soma-table-body soma-table-row");
+		  const ativos = [];
 
+		  for (const [i, row] of [...rows].entries()) {
+			const cells = row.querySelectorAll("soma-table-cell");
+			if (cells.length < 10) return;
 
-    // Variáveis de controle
-    const assinatura = filtros.assinatura;
-    const limite = filtros.limite_compra;
-    let ordem = filtros.ordem_classe;
-    const taxasMin = filtros.taxa_minima || { cdi: 0, ipca: 0, pre_fixado: 0 };
-    const filtrosAplicMin = filtros.aplicacao_minima || [];
+			const rentabilidadeText = cells[2]?.textContent?.trim() || "";
+			const aplicacaoMinText = cells[8]?.textContent?.trim() || "";
+			const somaButton = row.querySelector("soma-button[aria-label='Investir']");
+			const innerButton = somaButton?.shadowRoot?.querySelector("button");
+			const tipo = identificarClasse(rentabilidadeText);
+			const taxa = extrairTaxa(rentabilidadeText);
+			const taxaTexto = rentabilidadeText.trim();
+			const valorMinimo = extrairValorMinimo(aplicacaoMinText);
+			const vencimentoTexto = cells[1]?.textContent?.trim() || "";
+			const vencimentoStr = converterDataBRparaISO(vencimentoTexto);
+			const nomeAtivo = cells[0]?.textContent?.trim() || "Ativo sem nome";
+			
+			if (tipo === classe && taxa && innerButton) {
+			  const isento = nomeAtivo.includes("LCA") || nomeAtivo.includes("LCI") || nomeAtivo.includes("LCD");
 
-    function ativoPassaFiltroAplicMin(valor) {
-      if (filtrosAplicMin.length === 0) return true;
-      return filtrosAplicMin.some(chave => restricoesAplicMin[chave]?.(valor));
-    }
+			  ativos.push({ nome: nomeAtivo, tipo, taxa, taxaTexto, valorMinimo, vencimentoStr, botao: innerButton, isento });
+			  console.log(`✅ Ativo detectado: ${nomeAtivo}, Tipo: ${tipo}, Taxa: ${taxa}, Min: ${valorMinimo}, Venc: ${vencimentoStr}, Isento: ${isento}`);
+			  
+			}		
+		  }	  
+		  
+		  // Só calcula e envia se tiver ativos suficientes
+		  if (ativos.length > 0) {
+			const formatarMedia = (ativosGrupo, classe) => {
+			  if (ativosGrupo.length === 0) return null;
 
-    if (!Array.isArray(ordem)) ordem = ["cdi", "ipca", "pre_fixado"];
+			  const taxasNumericas = ativosGrupo.map(a => {
+				const t = a.taxaTexto.toUpperCase();
+				if (classe === "IPCA") {
+				  const m = t.match(/IPCA\s*\+?\s*([\d,\.]+)/);
+				  return m ? parseFloat(m[1].replace(",", ".")) : null;
+				} else if (classe === "CDI") {
+				  if (t.includes("CDI +")) {
+					const m = t.match(/CDI\s*\+\s*([\d,\.]+)/);
+					return m ? parseFloat(m[1].replace(",", ".")) : null;
+				  } else if (t.includes("%") && !t.includes("+")) {
+					const m = t.match(/([\d,\.]+)\s*%/);
+					return m ? parseFloat(m[1].replace(",", ".")) : null;
+				  }
+				} else {
+				  const m = t.match(/([\d,\.]+)\s*%/);
+				  return m ? parseFloat(m[1].replace(",", ".")) : null;
+				}
+				return null;
+			  }).filter(n => typeof n === "number");
 
-    try {
-	  console.log("🕒 Aguardando carregamento da tabela de ativos...");
-	  await esperarElemento("soma-table-body soma-table-row", 5000, false);
-	  await rolarAteFinalTabelaAtivos();
-      
-	} catch (err) {
-	  console.error("❌ Erro ao aguardar a tabela de ativos:", err);
-	  return;
-	}
-	
-	const saldoArmazenado = parseFloat(localStorage.getItem("saldoXP") || "0");
-    const saldoTotal = saldoArmazenado || await esperarSaldoDisponivel();
-    console.log("💰 Saldo total carregado para comparação:", saldoTotal);
+			  if (taxasNumericas.length === 0) return null;
 
-    for (const classe of ordem) {
-		
-	  await aplicarFiltroPorClasse(classe);
+			  const media = taxasNumericas.reduce((a, b) => a + b, 0) / taxasNumericas.length;
 
-	  try {
-		await esperarElemento("soma-table-body soma-table-row", 5000, false);
-		await new Promise(r => setTimeout(r, 500));
-		console.log(`✅ Tabela de ativos carregada para classe: ${classe}`);
-	  } catch (err) {
-		console.error(`❌ Erro ao carregar tabela da classe ${classe}:`, err);
-		continue;
-	  }
+			  if (classe === "IPCA") return `IPCA + ${media.toFixed(2)}%`;
+			  if (classe === "CDI" && ativosGrupo[0].taxaTexto.includes("+")) return `CDI + ${media.toFixed(2)}%`;
+			  if (classe === "CDI") return `${media.toFixed(0)}% do CDI`;
+			  return `${media.toFixed(2)}%`;
+			};
 
-	  const rows = document.querySelectorAll("soma-table-body soma-table-row");
-	  const ativos = [];
+			const ativosIsentos = ativos.filter(a => a.isento);
+			const ativosTributados = ativos.filter(a => !a.isento);
 
-	  rows.forEach((row, i) => {
-		const cells = row.querySelectorAll("soma-table-cell");
-		if (cells.length < 10) return;
+			const mediaIsentos = formatarMedia(ativosIsentos, classe.toUpperCase());
+			const mediaTributados = formatarMedia(ativosTributados, classe.toUpperCase());
 
-		const rentabilidadeText = cells[2]?.textContent?.trim() || "";
-		const aplicacaoMinText = cells[8]?.textContent?.trim() || "";
-		const somaButton = row.querySelector("soma-button[aria-label='Investir']");
-		const innerButton = somaButton?.shadowRoot?.querySelector("button");
-		const tipo = identificarClasse(rentabilidadeText);
-		const taxa = extrairTaxa(rentabilidadeText);
-		const valorMinimo = extrairValorMinimo(aplicacaoMinText);
-		const vencimentoTexto = cells[1]?.textContent?.trim() || "";
-		const vencimentoStr = converterDataBRparaISO(vencimentoTexto);
-		const nomeAtivo = cells[0]?.textContent?.trim() || "Ativo sem nome";
-
-		if (tipo === classe && taxa && innerButton) {
-		  ativos.push({ nome: nomeAtivo, tipo, taxa, valorMinimo, vencimentoStr, botao: innerButton });
-		  console.log(`✅ Ativo detectado: ${nomeAtivo}, Tipo: ${tipo}, Taxa: ${taxa}, Min: ${valorMinimo}, Venc: ${vencimentoStr}`);
-		}
-	  });
-		
-		const ativosFiltrados = ativos
-		  .filter(ativo => ativo.valorMinimo <= saldoTotal) // ← novo filtro
-		  .sort((a, b) => {
-			const diasA = calcularDiasCorridos(a.vencimentoStr);
-			const diasB = calcularDiasCorridos(b.vencimentoStr);
-			const taxaA = detectarIsencao(a.nome) ? calcularTaxaBrutaEquivalente(a.taxa, diasA) : a.taxa;
-			const taxaB = detectarIsencao(b.nome) ? calcularTaxaBrutaEquivalente(b.taxa, diasB) : b.taxa;
-			return taxaB - taxaA;
-		  });
- 
-	  
-	  for (const ativo of ativosFiltrados) {
-	  
-			const isIsento = detectarIsencao(ativo.nome);
-			const diasAteVencimento = calcularDiasCorridos(ativo.vencimentoStr);
-			const taxaComparada = isIsento ? calcularTaxaBrutaEquivalente(ativo.taxa, diasAteVencimento) : ativo.taxa;
-
-			console.log(`📊 Comparando ativo '${ativo.nome}' (${classe}): ${ativo.taxa}% ${isIsento ? "(isento IR)" : ""} → ${taxaComparada}% (mínima: ${taxasMin[classe]}%)`);
-
-			if (taxaComparada < taxasMin[classe]) continue;
-			if (!ativoPassaFiltroAplicMin(ativo.valorMinimo)) continue;
-
-			ativo.botao.scrollIntoView({ behavior: "smooth", block: "center" });
-			await new Promise(r => setTimeout(r, 100));
-			dispararCliqueReal(ativo.botao);
-			console.log("✅ Clique no botão 'Investir' efetuado.");
-			await new Promise(r => setTimeout(r, 600));
-
-			if (ativo.valorMinimo > saldoTotal) {
-			  console.warn(`⛔ Saldo insuficiente: mínimo R$${ativo.valorMinimo} > saldo R$${saldoTotal}`);
-			  continue;
+			const payloads = [];
+			if (mediaIsentos) {
+			  console.log("🔍 Média ISENTOS calculada:", mediaIsentos);
+			  payloads.push({
+				user_id,
+				data_referencia: new Date().toISOString().split("T")[0],
+				indexador: classe.toUpperCase(),
+				taxa_media: mediaIsentos,
+				isento_imposto: true
+			  });
+			}
+			if (mediaTributados) {
+			  console.log("🔍 Média TRIBUTADOS calculada:", mediaTributados);
+			  payloads.push({
+				user_id,
+				data_referencia: new Date().toISOString().split("T")[0],
+				indexador: classe.toUpperCase(),
+				taxa_media: mediaTributados,
+				isento_imposto: false
+			  });
 			}
 
-			const valorIdeal = Math.min(saldoTotal, limite);
-			const valorCompra = Math.max(ativo.valorMinimo, valorIdeal);
-
+			for (const payload of payloads) {
+			  console.log("📩 Enviando taxa média para o Supabase:", payload);
+			  await fetch(`${supabaseUrl}/rest/v1/taxas_media_xp`, {
+				  method: "POST",
+				  headers: {
+					"Content-Type": "application/json",
+					"apikey": supabaseAnonKey,
+					"Authorization": `Bearer ${access_token}` // ← isso agora está certo
+				  },
+				  body: JSON.stringify(payload)
+				});
+			}
+		  }
 			
-			const quantidadeOk = await preencherCampoQuantidadeInvestida(valorCompra, ativo.valorMinimo);
-			if (!quantidadeOk) continue;
+			const ativosFiltrados = ativos
+			  .filter(ativo => ativo.valorMinimo <= saldoTotal) // ← novo filtro
+			  .sort((a, b) => {
+				const diasA = calcularDiasCorridos(a.vencimentoStr);
+				const diasB = calcularDiasCorridos(b.vencimentoStr);
+				const taxaA = detectarIsencao(a.nome) ? calcularTaxaBrutaEquivalente(a.taxa, diasA) : a.taxa;
+				const taxaB = detectarIsencao(b.nome) ? calcularTaxaBrutaEquivalente(b.taxa, diasB) : b.taxa;
+				return taxaB - taxaA;
+			  });
+	 
+		  
+		  for (const ativo of ativosFiltrados) {
+		  
+				const isIsento = detectarIsencao(ativo.nome);
+				const diasAteVencimento = calcularDiasCorridos(ativo.vencimentoStr);
+				const taxaComparada = isIsento ? calcularTaxaBrutaEquivalente(ativo.taxa, diasAteVencimento) : ativo.taxa;
 
-			await marcarCheckboxConfirmacao();
-			await clicarBotaoAvancarEtapa();
-			await new Promise(r => setTimeout(r, 500)); // dá tempo para tela carregar
-			await marcarCheckboxEAvancar(); 
-			
-			const senhaOk = await digitarSenhaEletronica(assinatura) || true; //APAGAR DEPOIS - TESTE
+				console.log(`📊 Comparando ativo '${ativo.nome}' (${classe}): ${ativo.taxa}% ${isIsento ? "(isento IR)" : ""} → ${taxaComparada}% (mínima: ${taxasMin[classe]}%)`);
 
-			
-			//const senhaOk = await digitarSenhaEletronica(assinatura); // assinatura já está carregada via filtros
-			// ⚠️ BYPASS DE TESTE ATIVO:
-			// Comentado temporariamente para permitir testes mesmo com assinatura incorreta
-			// if (!senhaOk) {
-			//   console.warn("⚠️ A senha eletrônica não pôde ser digitada.");
-			//   continue; // tenta outro ativo
-			// }
-			
-			//await clicarBotaoFinalAposSenha();
+				if (taxaComparada < taxasMin[classe]) continue;
+				if (!ativoPassaFiltroAplicMin(ativo.valorMinimo)) continue;
 
-			logCompras.push({
-			  ativo: ativo.nome,
-			  classe: classe.toUpperCase(),
-			  taxaInformada: ativo.taxa.toFixed(2) + "%",
-			  taxaEfetiva: taxaComparada.toFixed(2) + "%" + (isIsento ? " (isento IR)" : ""),
-			  valorMinimo: "R$ " + ativo.valorMinimo.toLocaleString("pt-BR", { minimumFractionDigits: 2 }),
-			  valorComprado: "R$ " + valorCompra.toLocaleString("pt-BR", { minimumFractionDigits: 2 }),
-			  vencimentoISO: ativo.vencimentoStr,
-			  vencimentoBR: (() => {
-				const [ano, mes, dia] = ativo.vencimentoStr.split("-");
-				return `${dia}/${mes}/${ano}`;
-			  })(),
+				ativo.botao.scrollIntoView({ behavior: "smooth", block: "center" });
+				await new Promise(r => setTimeout(r, 100));
+				dispararCliqueReal(ativo.botao);
+				console.log("✅ Clique no botão 'Investir' efetuado.");
+				await new Promise(r => setTimeout(r, 600));
 
-			  horarioCompra: new Date().toLocaleString("pt-BR")
-			});
-			
-			console.log("📝 Ativo registrado no logCompras:", logCompras[logCompras.length - 1]);
+				if (ativo.valorMinimo > saldoTotal) {
+				  console.warn(`⛔ Saldo insuficiente: mínimo R$${ativo.valorMinimo} > saldo R$${saldoTotal}`);
+				  continue;
+				}
+
+				const valorIdeal = Math.min(saldoTotal, limite);
+				const valorCompra = Math.max(ativo.valorMinimo, valorIdeal);
+
+				
+				const quantidadeOk = await preencherCampoQuantidadeInvestida(valorCompra, ativo.valorMinimo);
+				if (!quantidadeOk) continue;
+
+				await marcarCheckboxConfirmacao();
+				await clicarBotaoAvancarEtapa();
+				await new Promise(r => setTimeout(r, 500)); // dá tempo para tela carregar
+				await marcarCheckboxEAvancar(); 
+				
+				const senhaOk = await digitarSenhaEletronica(assinatura) || true; //APAGAR DEPOIS - TESTE
+
+				
+				//const senhaOk = await digitarSenhaEletronica(assinatura); // assinatura já está carregada via filtros
+				// ⚠️ BYPASS DE TESTE ATIVO:
+				// Comentado temporariamente para permitir testes mesmo com assinatura incorreta
+				// if (!senhaOk) {
+				//   console.warn("⚠️ A senha eletrônica não pôde ser digitada.");
+				//   continue; // tenta outro ativo
+				// }
+				
+				//await clicarBotaoFinalAposSenha();
+
+				logCompras.push({
+				  ativo: ativo.nome,
+				  classe: classe.toUpperCase(),
+				  taxaInformada: ativo.taxa.toFixed(2) + "%",
+				  taxaEfetiva: taxaComparada.toFixed(2) + "%" + (isIsento ? " (isento IR)" : ""),
+				  valorMinimo: "R$ " + ativo.valorMinimo.toLocaleString("pt-BR", { minimumFractionDigits: 2 }),
+				  valorComprado: "R$ " + valorCompra.toLocaleString("pt-BR", { minimumFractionDigits: 2 }),
+				  vencimentoISO: ativo.vencimentoStr,
+				  vencimentoBR: (() => {
+					const [ano, mes, dia] = ativo.vencimentoStr.split("-");
+					return `${dia}/${mes}/${ano}`;
+				  })(),
+
+				  horarioCompra: new Date().toLocaleString("pt-BR")
+				});
+				
+				console.log("📝 Ativo registrado no logCompras:", logCompras[logCompras.length - 1]);
 
 
-			await new Promise(r => setTimeout(r, 1000));
-			break; // só realiza uma compra por classe	
+				await new Promise(r => setTimeout(r, 1000));
+				break; // só realiza uma compra por classe	
+			}
 		}
 	}
 	
     if (logCompras.length > 0) {
 	  console.log("🚀 Enviando dados para Supabase...");
 
-	  // ✅ Solicita o token do usuário ao background.js
-	  const user_id = await esperarTokenUsuario();
-	  console.log("🔐 Token do usuário recebido no content.js:", user_id);
-		  
-	  if (!user_id) {
-		console.warn("⚠️ Nenhum token de usuário disponível. Abortando envio ao Supabase.");
-		return;
-	  }
-
-
 	  const res = await fetch(`${supabaseUrl}/rest/v1/ativos_comprados`, {
 		method: "POST",
 		headers: {
 		  apikey: supabaseAnonKey,
-		  Authorization: `Bearer ${supabaseAnonKey}`,
+		  Authorization: `Bearer ${access_token}`,
 		  "Content-Type": "application/json",
 		  Prefer: "return=minimal"
 		},
@@ -786,4 +938,4 @@ async function esperarTokenUsuario(timeout = 5000) {
 	  console.error("Erro no script:", err);
 	}
 
-})();
+}

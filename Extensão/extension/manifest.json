@@ -18,8 +18,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://experiencia.xpi.com.br/*"],
-      "js": ["content.bundle.js"]
+      "matches": [
+        "http://localhost:3000/*",
+        "https://experiencia.xpi.com.br/*"
+      ],
+      "js": ["content.bundle.js"],
+      "run_at": "document_idle"
     }
   ],
   "icons": {
