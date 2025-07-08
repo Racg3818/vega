@@ -9,6 +9,7 @@
     "esbuild": "^0.25.5"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.50.2"
+    "@supabase/supabase-js": "^2.50.2",
+    "crypto-js": "^4.2.0"
   }
 }

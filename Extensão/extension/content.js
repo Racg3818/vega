@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-
-console.log("📡 content.js iniciado em:", window.location.href);
+import CryptoJS from "crypto-js";
 
 if (
   window.location.hostname.includes("localhost") ||
@@ -63,10 +62,11 @@ async function esperarCredenciais(timeout = 5000) {
 
 
 // ============ CONSTANTES ============
-const URL_API = "http://localhost:5000/filtros.json";
+//const URL_API = "http://localhost:5000/filtros.json";
 const logCompras = [];
 const supabaseUrl = "https://rgkvzoeanbkbeqjbntdq.supabase.co";
 const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJna3Z6b2VhbmJrYmVxamJudGRxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA5MDczMjEsImV4cCI6MjA2NjQ4MzMyMX0.Qhy9GQOJD0wLSBmGLdS6QGxvERfST2FYqCDBo-F1njk";
+const supabase = createClient(supabaseUrl,supabaseAnonKey)
 
 // ============ CAPTURA DE SALDO VIA TELA DE CONTA ============
 if (window.location.href.includes("https://experiencia.xpi.com.br/conta/#/")) {
@@ -568,7 +568,6 @@ async function digitarSenhaEletronica(senha) {
   return true;
 }
 
-// Aguarda e clica no botão 'Avançar etapa' após senha
 async function clicarBotaoFinalAposSenha() {
   let tentativas = 10;
   let botaoFinal = null;
@@ -612,8 +611,49 @@ async function aplicarFiltrosXP() {
   try {
 	  
     if (window.location.href.includes("experiencia.xpi.com.br/renda-fixa")) {
-	  const res = await fetch(URL_API);
-	  const filtros = await res.json(); 
+		
+	  const { data, error } = await supabase
+		  .from("filtros")
+		  .select("*")
+		  .eq("user_id", user_id)
+		  .order("created_at", { ascending: false })
+		  .limit(1)
+		  .maybeSingle();
+
+	  if (error || !data) {
+	    console.error("❌ Erro ao buscar filtros do Supabase:", error);
+	    return;
+	  }
+
+	  const filtros = {
+		  ...data.selecionados, // já é um objeto JSON no Supabase
+		  assinatura: data.assinatura || "",
+		  limite_compra: data.limite_compra || 0,
+		  ordem_classe: Array.isArray(data.ordem_classe) ? data.ordem_classe : [],
+		  taxa_minima: data.taxa_minima || { cdi: 0, ipca: 0, pre_fixado: 0 },
+		};
+		
+		try {
+		  if (data.assinatura && user_id) {
+			const bytes = CryptoJS.AES.decrypt(data.assinatura, user_id);
+			const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+
+			if (decrypted) {
+			  filtros.assinatura = decrypted;
+			  console.log("🔐 Assinatura descriptografada e atribuída aos filtros.");
+			} else {
+			  console.warn("⚠️ Assinatura inválida ou chave incorreta.");
+			}
+		  } else {
+			console.warn("⚠️ Campo de assinatura ou user_id ausente.");
+		  }
+		} catch (e) {
+		  console.error("❌ Erro ao descriptografar assinatura:", e);
+		}
+
+		
+	  console.log("✅ Filtros carregados:", filtros);
+
 	  
 	  // Aguarda e clica no filtro inicial
 	  try {
