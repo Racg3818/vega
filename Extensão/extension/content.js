@@ -62,11 +62,10 @@ async function esperarCredenciais(timeout = 5000) {
 
 
 // ============ CONSTANTES ============
-//const URL_API = "http://localhost:5000/filtros.json";
+
 const logCompras = [];
 const supabaseUrl = "https://rgkvzoeanbkbeqjbntdq.supabase.co";
 const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJna3Z6b2VhbmJrYmVxamJudGRxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA5MDczMjEsImV4cCI6MjA2NjQ4MzMyMX0.Qhy9GQOJD0wLSBmGLdS6QGxvERfST2FYqCDBo-F1njk";
-const supabase = createClient(supabaseUrl,supabaseAnonKey)
 
 // ============ CAPTURA DE SALDO VIA TELA DE CONTA ============
 if (window.location.href.includes("https://experiencia.xpi.com.br/conta/#/")) {
@@ -599,20 +598,31 @@ esperarCredenciais().then((credenciais) => {
 	access_token = credenciais.access_token;
 	user_id = credenciais.user_id;
 	console.log("✅ access_token e user_id carregados do storage:", credenciais);
+	
+	const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+	    global: {
+		  headers: {
+		    Authorization: `Bearer ${access_token}`
+		  }
+	    }
+	  });
+	  
+	 console.log("✅ Supabase Client:", supabase);
 
-	aplicarFiltrosXP(); // agora sim pode chamar a função
+	aplicarFiltrosXP(supabase);
   }).catch((err) => {
 	console.error(err);
 });
 
   
 // ============ CÓDIGO PRINCIPAL ============
-async function aplicarFiltrosXP() {
+async function aplicarFiltrosXP(supabase) {	
+	
   try {
 	  
-    if (window.location.href.includes("experiencia.xpi.com.br/renda-fixa")) {
+    if (window.location.href.includes("experiencia.xpi.com.br/renda-fixa")) {		
 		
-	  const { data, error } = await supabase
+	 const { data, error } = await supabase
 		  .from("filtros")
 		  .select("*")
 		  .eq("user_id", user_id)
@@ -626,7 +636,7 @@ async function aplicarFiltrosXP() {
 	  }
 
 	  const filtros = {
-		  ...data.selecionados, // já é um objeto JSON no Supabase
+		  ...data.selecionados, 
 		  assinatura: data.assinatura || "",
 		  limite_compra: data.limite_compra || 0,
 		  ordem_classe: Array.isArray(data.ordem_classe) ? data.ordem_classe : [],

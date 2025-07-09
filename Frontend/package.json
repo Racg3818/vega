@@ -4,6 +4,15 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.50.2",
-    "lottie-react": "^2.4.1"
-  }
+    "lottie-react": "^2.4.1",
+    "next": "^15.3.5",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "scripts": {
+	  "dev": "next dev",
+	  "build": "next build",
+	  "start": "next start"
+	}
+  
 }
