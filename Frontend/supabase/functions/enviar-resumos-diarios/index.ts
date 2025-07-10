@@ -1,12 +1,12 @@
 import { serve } from "https://deno.land/std/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-serve(async () => {
+serve(async (req) => {
   try {
     const agora = new Date();
     const offsetMS = 3 * 60 * 60 * 1000; // UTC-3
@@ -18,8 +18,13 @@ serve(async () => {
     ));
     const fim = new Date(inicio);
     fim.setUTCDate(fim.getUTCDate() + 1);
-
-    const { data: compras, error } = await supabase
+	
+	console.log("✅ Supabase client instanciado com:", {
+	  url: supabaseUrl,
+	  keyPrefix: supabaseKey.slice(0, 6) + "...",
+	});
+	
+	const { data: compras, error } = await supabase
       .from("ativos_comprados")
       .select(`
         user_id,
@@ -95,11 +100,11 @@ serve(async () => {
         data_hora_compra: new Date(a.data_hora_compra).toLocaleString("pt-BR")
       }));
 
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+      const response = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+          Authorization: `Bearer ${supabaseKey}`,
         },
         body: JSON.stringify({
           to: email,

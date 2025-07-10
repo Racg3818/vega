@@ -20,7 +20,7 @@ if (
           user_id: auth.user_id,
         },
         () => {
-          console.log("✅ Credenciais recebidas via postMessage e salvas:", auth);
+          //console.log("✅ Credenciais recebidas via postMessage e salvas:", auth);
         }
       );
     }
@@ -597,7 +597,7 @@ async function clicarBotaoFinalAposSenha() {
 esperarCredenciais().then((credenciais) => {
 	access_token = credenciais.access_token;
 	user_id = credenciais.user_id;
-	console.log("✅ access_token e user_id carregados do storage:", credenciais);
+	//console.log("✅ access_token e user_id carregados do storage:", credenciais);
 	
 	const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 	    global: {
@@ -607,7 +607,7 @@ esperarCredenciais().then((credenciais) => {
 	    }
 	  });
 	  
-	 console.log("✅ Supabase Client:", supabase);
+	 //console.log("✅ Supabase Client:", supabase);
 
 	aplicarFiltrosXP(supabase);
   }).catch((err) => {
