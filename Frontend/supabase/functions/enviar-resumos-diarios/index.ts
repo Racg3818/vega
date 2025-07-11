@@ -56,6 +56,7 @@ serve(async (req) => {
     try {
       const resultado = await supabase.rpc("buscar_emails_por_ids", { ids: usuariosUnicos });
       perfis = resultado.data;
+	  
       const erroPerfis = resultado.error;
 
       if (erroPerfis) {
@@ -79,14 +80,20 @@ serve(async (req) => {
       });
     }
 
-    const emailsMap = new Map(perfis.map((p: any) => [p.id, p.email]));
-
+    const perfilMap = new Map(perfis.map((p: any) => [p.id, { email: p.email, nome: p.nome }]));
+	
     for (const userId of usuariosUnicos) {
-      const email = emailsMap.get(userId);
-      if (!email) {
-        console.warn("Email não encontrado para o usuário:", userId);
-        continue;
-      }
+		
+	  const perfil = perfilMap.get(userId);
+  
+	  if (!perfil || !perfil.email) {
+		console.warn("Perfil não encontrado para o usuário:", userId);
+		continue;
+	  }
+
+	  const { email, nome } = perfil;
+	  
+	  const nome_usuario = perfil.nome?.split(" ")[0] || "cliente"; 
 
       const ativosDoUsuario = compras.filter((c) => c.user_id === userId);
       const ativosFormatados = ativosDoUsuario.map(a => ({
@@ -109,7 +116,7 @@ serve(async (req) => {
         body: JSON.stringify({
           to: email,
           tipo: "resumo",
-          nome: "Cliente",
+          nome: nome_usuario,
           ativos: ativosFormatados
         }),
       });

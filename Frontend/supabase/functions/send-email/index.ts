@@ -139,11 +139,6 @@ serve(async (req) => {
 				  ${ativosHTML}
 				</table>
 
-				<p style="margin-top: 24px;">
-				  <strong>Sua taxa média:</strong> <span style="color: #10b981;">${taxaMediaCliente}</span><br/>
-				  <strong>Taxa média da plataforma:</strong> <span style="color: #10b981;">${taxaMediaPlataforma}</span>
-				</p>
-
 				<p style="margin-top: 30px;">Ficou com dúvidas? Estamos por aqui!</p>
 				<p><strong>Equipe Vega</strong></p>
 			  </td>
